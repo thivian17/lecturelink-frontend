@@ -140,7 +140,8 @@ export default function RecordPage() {
           // Store content locally before any cleanup
           const markdownContent = result.master_document?.markdown_content
           const transcript = result.transcript || ''
-          const duration = result.summary?.audio_duration_seconds || 0
+          // Round duration to integer (database expects integer type)
+          const duration = Math.round(result.summary?.audio_duration_seconds || 0)
 
           console.log('[LectureLink] Extracted data:', {
             hasMarkdown: !!markdownContent,
