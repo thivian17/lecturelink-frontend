@@ -1,22 +1,21 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import type { Lecture, LectureSummary, KeyConcept, Definition, ActionItem } from '@/lib/types'
 
-type TabType = 'report' | 'transcript'
+type TabType = 'summary' | 'keypoints' | 'transcript'
 
 export default function LecturePage() {
   const params = useParams()
-  const router = useRouter()
   const lectureId = params.id as string
   const supabase = createClient()
 
   const [lecture, setLecture] = useState<Lecture | null>(null)
   const [summary, setSummary] = useState<LectureSummary | null>(null)
-  const [activeTab, setActiveTab] = useState<TabType>('report')
+  const [activeTab, setActiveTab] = useState<TabType>('summary')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -27,7 +26,7 @@ export default function LecturePage() {
   const fetchLecture = async () => {
     try {
       setLoading(true)
-      
+
       // Fetch lecture
       const { data: lectureData, error: lectureError } = await supabase
         .from('lectures')
@@ -57,7 +56,7 @@ export default function LecturePage() {
   }
 
   const formatDuration = (seconds: number | undefined): string => {
-    if (!seconds) return '—'
+    if (!seconds) return ''
     const hours = Math.floor(seconds / 3600)
     const mins = Math.floor((seconds % 3600) / 60)
     if (hours > 0) return `${hours}h ${mins}m`
@@ -80,6 +79,111 @@ export default function LecturePage() {
 
   const getConceptExplanation = (concept: KeyConcept): string => {
     return concept.explanation || concept.definition || ''
+  }
+
+  // Generate PDF content and download
+  const downloadPDF = async () => {
+    if (!lecture || !summary) return
+
+    // Create HTML content for the PDF
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>${lecture.title} - Lecture Summary</title>
+        <style>
+          body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 40px; line-height: 1.6; }
+          h1 { color: #1a1a1a; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; }
+          h2 { color: #374151; margin-top: 30px; }
+          h3 { color: #4b5563; }
+          .meta { color: #6b7280; font-size: 14px; margin-bottom: 30px; }
+          .section { margin-bottom: 30px; padding: 20px; background: #f9fafb; border-radius: 8px; }
+          .concept { margin-bottom: 15px; padding-left: 15px; border-left: 3px solid #3b82f6; }
+          .definition { margin-bottom: 15px; padding-left: 15px; border-left: 3px solid #8b5cf6; }
+          .takeaway { margin-bottom: 10px; padding-left: 20px; position: relative; }
+          .takeaway::before { content: "\\2713"; position: absolute; left: 0; color: #22c55e; }
+          .importance { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 10px; }
+          .importance-high { background: #fee2e2; color: #dc2626; }
+          .importance-medium { background: #fef3c7; color: #d97706; }
+          .importance-low { background: #f3f4f6; color: #6b7280; }
+          .transcript { white-space: pre-wrap; background: #f9fafb; padding: 20px; border-radius: 8px; }
+          @media print { body { padding: 20px; } }
+        </style>
+      </head>
+      <body>
+        <h1>${lecture.title}</h1>
+        <div class="meta">
+          <p>Date: ${formatDate(lecture.created_at)}</p>
+          ${lecture.duration ? `<p>Duration: ${formatDuration(lecture.duration)}</p>` : ''}
+          ${lecture.has_slides ? '<p>Includes slide alignment</p>' : ''}
+        </div>
+
+        ${summary.summary ? `
+        <div class="section">
+          <h2>Overview</h2>
+          <p>${summary.summary}</p>
+        </div>
+        ` : ''}
+
+        ${summary.important_points && summary.important_points.length > 0 ? `
+        <div class="section">
+          <h2>Key Takeaways</h2>
+          ${summary.important_points.map(point => `<div class="takeaway">${point}</div>`).join('')}
+        </div>
+        ` : ''}
+
+        ${summary.key_concepts && summary.key_concepts.length > 0 ? `
+        <div class="section">
+          <h2>Key Concepts</h2>
+          ${summary.key_concepts.map(concept => `
+            <div class="concept">
+              <h3>${getConceptName(concept)}
+                ${concept.importance ? `<span class="importance importance-${concept.importance}">${concept.importance}</span>` : ''}
+              </h3>
+              <p>${getConceptExplanation(concept)}</p>
+            </div>
+          `).join('')}
+        </div>
+        ` : ''}
+
+        ${summary.definitions && summary.definitions.length > 0 ? `
+        <div class="section">
+          <h2>Definitions</h2>
+          ${summary.definitions.map(def => `
+            <div class="definition">
+              <h3>${def.term}</h3>
+              <p>${def.definition}</p>
+              ${def.context ? `<p><em>${def.context}</em></p>` : ''}
+            </div>
+          `).join('')}
+        </div>
+        ` : ''}
+
+        ${lecture.transcript ? `
+        <div class="section">
+          <h2>Full Transcript</h2>
+          <div class="transcript">${lecture.transcript}</div>
+        </div>
+        ` : ''}
+
+        <footer style="margin-top: 50px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 12px;">
+          Generated by LectureLink on ${new Date().toLocaleDateString()}
+        </footer>
+      </body>
+      </html>
+    `
+
+    // Open in new window for printing/saving as PDF
+    const printWindow = window.open('', '_blank')
+    if (printWindow) {
+      printWindow.document.write(htmlContent)
+      printWindow.document.close()
+      // Slight delay to ensure content is loaded
+      setTimeout(() => {
+        printWindow.print()
+      }, 250)
+    }
   }
 
   if (loading) {
@@ -124,7 +228,7 @@ export default function LecturePage() {
         >
           ← Back to Dashboard
         </Link>
-        
+
         <div className="flex items-start justify-between">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 mb-2">
@@ -146,17 +250,28 @@ export default function LecturePage() {
               )}
             </div>
           </div>
-          
-          <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-            lecture.status === 'completed' 
-              ? 'bg-green-50 text-green-700'
-              : lecture.status === 'processing'
-              ? 'bg-yellow-50 text-yellow-700'
-              : 'bg-red-50 text-red-700'
-          }`}>
-            {lecture.status === 'completed' ? '✓ Completed' : 
-             lecture.status === 'processing' ? '⏳ Processing' : '✕ Failed'}
-          </span>
+
+          <div className="flex items-center gap-3">
+            {summary && (
+              <button
+                onClick={downloadPDF}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2 text-sm font-medium"
+              >
+                <span>📄</span>
+                Download PDF
+              </button>
+            )}
+            <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+              lecture.status === 'completed'
+                ? 'bg-green-50 text-green-700'
+                : lecture.status === 'processing'
+                ? 'bg-yellow-50 text-yellow-700'
+                : 'bg-red-50 text-red-700'
+            }`}>
+              {lecture.status === 'completed' ? '✓ Completed' :
+               lecture.status === 'processing' ? '⏳ Processing' : '✕ Failed'}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -181,14 +296,24 @@ export default function LecturePage() {
       <div className="border-b border-gray-200 mb-6">
         <nav className="flex gap-8">
           <button
-            onClick={() => setActiveTab('report')}
+            onClick={() => setActiveTab('summary')}
             className={`pb-3 border-b-2 font-medium text-sm transition ${
-              activeTab === 'report'
+              activeTab === 'summary'
                 ? 'border-blue-600 text-blue-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            AI Report
+            📋 Summary
+          </button>
+          <button
+            onClick={() => setActiveTab('keypoints')}
+            className={`pb-3 border-b-2 font-medium text-sm transition ${
+              activeTab === 'keypoints'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            💡 Key Points
           </button>
           <button
             onClick={() => setActiveTab('transcript')}
@@ -198,13 +323,13 @@ export default function LecturePage() {
                 : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            Transcript
+            📝 Transcript
           </button>
         </nav>
       </div>
 
-      {/* Tab Content */}
-      {activeTab === 'report' && (
+      {/* Summary Tab */}
+      {activeTab === 'summary' && (
         <div className="space-y-8">
           {!summary && !isProcessing ? (
             <div className="bg-gray-50 rounded-xl p-12 text-center">
@@ -214,6 +339,119 @@ export default function LecturePage() {
               </h3>
               <p className="text-gray-500">
                 The AI summary for this lecture hasn&apos;t been generated yet.
+              </p>
+            </div>
+          ) : summary && (
+            <>
+              {/* Overview */}
+              {summary.summary && (
+                <section className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                      <span className="text-xl">📝</span>
+                    </div>
+                    <h2 className="text-xl font-bold text-gray-900">Overview</h2>
+                  </div>
+                  <p className="text-gray-700 leading-relaxed">{summary.summary}</p>
+                </section>
+              )}
+
+              {/* Key Takeaways */}
+              {summary.important_points && summary.important_points.length > 0 && (
+                <section className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                      <span className="text-xl">⭐</span>
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-bold text-gray-900">Key Takeaways</h2>
+                      <p className="text-sm text-gray-500">
+                        {summary.important_points.length} important points
+                      </p>
+                    </div>
+                  </div>
+
+                  <ul className="space-y-3">
+                    {summary.important_points.map((point: string, index: number) => (
+                      <li
+                        key={index}
+                        className="flex items-start gap-3 text-gray-700"
+                      >
+                        <span className="text-green-500 mt-1">✓</span>
+                        <span>{point}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {/* Action Items */}
+              {summary.action_items && summary.action_items.length > 0 && (
+                <section className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
+                      <span className="text-xl">📌</span>
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-bold text-gray-900">Action Items</h2>
+                      <p className="text-sm text-gray-500">
+                        {summary.action_items.length} tasks identified
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    {summary.action_items.map((item: ActionItem, index: number) => (
+                      <div
+                        key={index}
+                        className="flex items-start gap-3 p-3 bg-orange-50 rounded-lg"
+                      >
+                        <input
+                          type="checkbox"
+                          className="mt-1 w-4 h-4 rounded border-gray-300"
+                        />
+                        <div>
+                          <p className="text-gray-900">{item.item || item.task}</p>
+                          {item.due_date && (
+                            <p className="text-xs text-orange-600 mt-1">
+                              Due: {item.due_date}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Show placeholder if no content */}
+              {!summary.summary && (!summary.important_points || summary.important_points.length === 0) && (
+                <div className="bg-gray-50 rounded-xl p-12 text-center">
+                  <div className="text-4xl mb-4">📋</div>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">
+                    Summary content not available
+                  </h3>
+                  <p className="text-gray-500">
+                    Check the Key Points tab for concepts and definitions.
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Key Points Tab */}
+      {activeTab === 'keypoints' && (
+        <div className="space-y-8">
+          {!summary && !isProcessing ? (
+            <div className="bg-gray-50 rounded-xl p-12 text-center">
+              <div className="text-4xl mb-4">💡</div>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">
+                No key points available
+              </h3>
+              <p className="text-gray-500">
+                Key concepts and definitions haven&apos;t been extracted yet.
               </p>
             </div>
           ) : summary && (
@@ -232,7 +470,7 @@ export default function LecturePage() {
                       </p>
                     </div>
                   </div>
-                  
+
                   <div className="space-y-4">
                     {summary.key_concepts.map((concept: KeyConcept, index: number) => (
                       <div
@@ -243,25 +481,37 @@ export default function LecturePage() {
                           <h3 className="font-semibold text-gray-900">
                             {getConceptName(concept)}
                           </h3>
-                          {concept.slide_reference && (
-                            <span className="text-xs bg-blue-200 text-blue-800 px-2 py-1 rounded-full">
-                              Slide {concept.slide_reference}
-                            </span>
-                          )}
+                          <div className="flex items-center gap-2">
+                            {concept.slide_reference && (
+                              <span className="text-xs bg-blue-200 text-blue-800 px-2 py-1 rounded-full">
+                                Slide {concept.slide_reference}
+                              </span>
+                            )}
+                            {concept.importance && (
+                              <span className={`text-xs px-2 py-1 rounded-full ${
+                                concept.importance === 'high'
+                                  ? 'bg-red-100 text-red-700'
+                                  : concept.importance === 'medium'
+                                  ? 'bg-yellow-100 text-yellow-700'
+                                  : 'bg-gray-100 text-gray-700'
+                              }`}>
+                                {concept.importance}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <p className="text-gray-700 mt-1 text-sm">
+                        <p className="text-gray-700 mt-2 text-sm">
                           {getConceptExplanation(concept)}
                         </p>
-                        {concept.importance && (
-                          <span className={`inline-block mt-2 text-xs px-2 py-1 rounded-full ${
-                            concept.importance === 'high' 
-                              ? 'bg-red-100 text-red-700'
-                              : concept.importance === 'medium'
-                              ? 'bg-yellow-100 text-yellow-700'
-                              : 'bg-gray-100 text-gray-700'
-                          }`}>
-                            {concept.importance} importance
-                          </span>
+                        {concept.examples && concept.examples.length > 0 && (
+                          <div className="mt-3">
+                            <p className="text-xs font-medium text-gray-500 mb-1">Examples:</p>
+                            <ul className="text-sm text-gray-600 list-disc list-inside">
+                              {concept.examples.map((ex, i) => (
+                                <li key={i}>{ex}</li>
+                              ))}
+                            </ul>
+                          </div>
                         )}
                       </div>
                     ))}
@@ -283,7 +533,7 @@ export default function LecturePage() {
                       </p>
                     </div>
                   </div>
-                  
+
                   <div className="space-y-4">
                     {summary.definitions.map((def: Definition, index: number) => (
                       <div
@@ -308,90 +558,55 @@ export default function LecturePage() {
                 </section>
               )}
 
-              {/* Important Points */}
-              {summary.important_points && summary.important_points.length > 0 && (
-                <section className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-                  <div className="flex items-center gap-3 mb-6">
-                    <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                      <span className="text-xl">⭐</span>
-                    </div>
-                    <div>
-                      <h2 className="text-xl font-bold text-gray-900">Key Takeaways</h2>
-                      <p className="text-sm text-gray-500">
-                        {summary.important_points.length} important points
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <ul className="space-y-3">
-                    {summary.important_points.map((point: string, index: number) => (
-                      <li
-                        key={index}
-                        className="flex items-start gap-3 text-gray-700"
-                      >
-                        <span className="text-green-500 mt-1">✓</span>
-                        <span>{point}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              )}
-
-              {/* Action Items */}
-              {summary.action_items && summary.action_items.length > 0 && (
-                <section className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-                  <div className="flex items-center gap-3 mb-6">
-                    <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
-                      <span className="text-xl">📝</span>
-                    </div>
-                    <div>
-                      <h2 className="text-xl font-bold text-gray-900">Action Items</h2>
-                      <p className="text-sm text-gray-500">
-                        {summary.action_items.length} tasks identified
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-3">
-                    {summary.action_items.map((item: ActionItem, index: number) => (
-                      <div
-                        key={index}
-                        className="flex items-start gap-3 p-3 bg-orange-50 rounded-lg"
-                      >
-                        <input 
-                          type="checkbox" 
-                          className="mt-1 w-4 h-4 rounded border-gray-300"
-                        />
-                        <div>
-                          <p className="text-gray-900">{item.item || item.task}</p>
-                          {item.due_date && (
-                            <p className="text-xs text-orange-600 mt-1">
-                              Due: {item.due_date}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </section>
+              {/* Show placeholder if no content */}
+              {(!summary.key_concepts || summary.key_concepts.length === 0) &&
+               (!summary.definitions || summary.definitions.length === 0) && (
+                <div className="bg-gray-50 rounded-xl p-12 text-center">
+                  <div className="text-4xl mb-4">💡</div>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">
+                    No key points extracted
+                  </h3>
+                  <p className="text-gray-500">
+                    Concepts and definitions will appear here once processed.
+                  </p>
+                </div>
               )}
             </>
           )}
         </div>
       )}
 
+      {/* Transcript Tab */}
       {activeTab === 'transcript' && (
         <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
-              <span className="text-xl">📝</span>
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
+                <span className="text-xl">📝</span>
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Full Transcript</h2>
+                <p className="text-sm text-gray-500">Complete lecture transcription</p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">Full Transcript</h2>
-              <p className="text-sm text-gray-500">Complete lecture transcription</p>
-            </div>
+            {lecture.transcript && (
+              <button
+                onClick={() => {
+                  const blob = new Blob([lecture.transcript || ''], { type: 'text/plain' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `${lecture.title}-transcript.txt`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                }}
+                className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition"
+              >
+                Download TXT
+              </button>
+            )}
           </div>
-          
+
           {lecture.transcript ? (
             <div className="bg-gray-50 rounded-lg p-6 max-h-[600px] overflow-y-auto">
               <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">
@@ -405,9 +620,9 @@ export default function LecturePage() {
                 No transcript available
               </h3>
               <p className="text-gray-500">
-                {isProcessing 
+                {isProcessing
                   ? 'Transcript is being generated...'
-                  : 'The transcript for this lecture is not available.'}
+                  : 'The transcript for this lecture is not available. It may need to be saved during processing.'}
               </p>
             </div>
           )}
