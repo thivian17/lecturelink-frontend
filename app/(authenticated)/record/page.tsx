@@ -134,10 +134,12 @@ export default function RecordPage() {
         setProgress(90)
 
         try {
-          const result = await api.getJobResult(jobId)
+          const result = await api.getJobResult(jobId) as any
 
-          // Store markdown content locally before any cleanup
+          // Store content locally before any cleanup
           const markdownContent = result.master_document?.markdown_content
+          const transcript = result.transcript || ''
+          const duration = result.summary?.audio_duration_seconds || 0
 
           if (markdownContent) {
             // Generate summary using locally stored content
@@ -153,26 +155,33 @@ export default function RecordPage() {
             await supabase.from('lecture_summaries').upsert({
               lecture_id: lectureId,
               title: summary.title || summaryResponse.lecture_title || lectureName,
+              summary: summary.overview || '',
               key_concepts: summary.key_concepts || [],
               definitions: summary.definitions || [],
               important_points: summary.main_takeaways || [],
               action_items: [],
             })
 
-            // Update lecture status
+            // Update lecture with transcript and status
             await supabase
               .from('lectures')
               .update({
                 status: 'completed',
+                transcript: transcript,
+                duration: duration,
                 has_slides: !!slidesFile,
                 has_alignment: !!slidesFile,
               })
               .eq('id', lectureId)
           } else {
-            // No markdown content, just mark as completed
+            // No markdown content, just mark as completed with transcript
             await supabase
               .from('lectures')
-              .update({ status: 'completed' })
+              .update({
+                status: 'completed',
+                transcript: transcript,
+                duration: duration,
+              })
               .eq('id', lectureId)
           }
 
