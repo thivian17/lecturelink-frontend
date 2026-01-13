@@ -20,12 +20,25 @@ export default function LecturePage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetchLecture()
+    fetchLecture(true) // Initial load with loading state
   }, [lectureId])
 
-  const fetchLecture = async () => {
+  // Auto-refresh while processing
+  useEffect(() => {
+    if (lecture?.status === 'processing') {
+      const interval = setInterval(() => {
+        fetchLecture(false) // Background refresh without loading spinner
+      }, 5000) // Refresh every 5 seconds
+
+      return () => clearInterval(interval)
+    }
+  }, [lecture?.status])
+
+  const fetchLecture = async (isInitialLoad = false) => {
     try {
-      setLoading(true)
+      if (isInitialLoad) {
+        setLoading(true)
+      }
 
       // Fetch lecture
       const { data: lectureData, error: lectureError } = await supabase
@@ -49,9 +62,13 @@ export default function LecturePage() {
       }
     } catch (err) {
       console.error('Error fetching lecture:', err)
-      setError('Failed to load lecture')
+      if (isInitialLoad) {
+        setError('Failed to load lecture')
+      }
     } finally {
-      setLoading(false)
+      if (isInitialLoad) {
+        setLoading(false)
+      }
     }
   }
 

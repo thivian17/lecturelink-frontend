@@ -54,12 +54,12 @@ export default function RecordPage() {
     const file = e.target.files?.[0]
     if (!file) return
 
-    const validTypes = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/webm', 'audio/m4a', 'audio/mp4', 'audio/x-m4a']
-    const validExtensions = ['mp3', 'wav', 'webm', 'm4a', 'mp4']
+    const validTypes = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/webm', 'audio/m4a', 'audio/mp4', 'audio/x-m4a', 'audio/flac', 'audio/x-flac']
+    const validExtensions = ['mp3', 'wav', 'webm', 'm4a', 'mp4', 'flac']
     const extension = file.name.split('.').pop()?.toLowerCase()
 
     if (!validTypes.includes(file.type) && !validExtensions.includes(extension || '')) {
-      setError('Please upload an MP3, WAV, WebM, or M4A audio file')
+      setError('Please upload an MP3, WAV, WebM, M4A, or FLAC audio file')
       return
     }
 
@@ -135,24 +135,52 @@ export default function RecordPage() {
 
         try {
           const result = await api.getJobResult(jobId) as any
+          console.log('[LectureLink] Job result received:', JSON.stringify(result, null, 2))
 
           // Store content locally before any cleanup
           const markdownContent = result.master_document?.markdown_content
           const transcript = result.transcript || ''
           const duration = result.summary?.audio_duration_seconds || 0
 
+          console.log('[LectureLink] Extracted data:', {
+            hasMarkdown: !!markdownContent,
+            transcriptLength: transcript.length,
+            duration
+          })
+
+          // Always save transcript first, regardless of summary generation
+          setStage('saving')
+          setStatusMessage('Saving to database...')
+          setProgress(92)
+
+          // Update lecture with transcript
+          const { error: lectureUpdateError } = await supabase
+            .from('lectures')
+            .update({
+              status: 'completed',
+              transcript: transcript,
+              duration: duration,
+              has_slides: !!slidesFile,
+              has_alignment: !!slidesFile,
+            })
+            .eq('id', lectureId)
+
+          if (lectureUpdateError) {
+            console.error('[LectureLink] Failed to save lecture:', lectureUpdateError)
+          } else {
+            console.log('[LectureLink] Lecture updated with transcript')
+          }
+
+          // Generate and save summary if we have markdown content
           if (markdownContent) {
-            // Generate summary using locally stored content
+            setStatusMessage('Generating AI summary...')
+            setProgress(95)
+
             const summaryResponse = await api.generateSummary(markdownContent, lectureName) as any
             // API returns { summary: { title, key_concepts, ... } }
             const summary = summaryResponse.summary || summaryResponse
 
-            // Save summary to database
-            setStage('saving')
-            setStatusMessage('Saving to database...')
-            setProgress(95)
-
-            await supabase.from('lecture_summaries').upsert({
+            const { error: summaryError } = await supabase.from('lecture_summaries').upsert({
               lecture_id: lectureId,
               title: summary.title || summaryResponse.lecture_title || lectureName,
               summary: summary.overview || '',
@@ -162,27 +190,11 @@ export default function RecordPage() {
               action_items: [],
             })
 
-            // Update lecture with transcript and status
-            await supabase
-              .from('lectures')
-              .update({
-                status: 'completed',
-                transcript: transcript,
-                duration: duration,
-                has_slides: !!slidesFile,
-                has_alignment: !!slidesFile,
-              })
-              .eq('id', lectureId)
-          } else {
-            // No markdown content, just mark as completed with transcript
-            await supabase
-              .from('lectures')
-              .update({
-                status: 'completed',
-                transcript: transcript,
-                duration: duration,
-              })
-              .eq('id', lectureId)
+            if (summaryError) {
+              console.error('[LectureLink] Failed to save summary:', summaryError)
+            } else {
+              console.log('[LectureLink] Summary saved successfully')
+            }
           }
 
           setStage('complete')
@@ -198,12 +210,16 @@ export default function RecordPage() {
           }, 1500)
 
         } catch (err) {
-          console.error('Summary generation failed:', err)
-          // Still mark as complete, just without summary
-          await supabase
-            .from('lectures')
-            .update({ status: 'completed' })
-            .eq('id', lectureId)
+          console.error('[LectureLink] Processing failed:', err)
+          // Try to at least mark as complete
+          try {
+            await supabase
+              .from('lectures')
+              .update({ status: 'completed' })
+              .eq('id', lectureId)
+          } catch (updateErr) {
+            console.error('[LectureLink] Failed to update status:', updateErr)
+          }
 
           // Cleanup job even on error
           await api.deleteJob(jobId).catch(() => {})
@@ -353,14 +369,14 @@ export default function RecordPage() {
                     Click to upload audio
                   </p>
                   <p className="text-xs text-gray-400 mt-1">
-                    MP3, WAV, M4A, WEBM (max 500MB)
+                    MP3, WAV, M4A, FLAC, WEBM (max 500MB)
                   </p>
                 </div>
                 <input
                   ref={audioInputRef}
                   type="file"
                   className="hidden"
-                  accept=".mp3,.wav,.webm,.m4a,.mp4,audio/*"
+                  accept=".mp3,.wav,.webm,.m4a,.mp4,.flac,audio/*"
                   onChange={handleAudioSelect}
                   disabled={isProcessing}
                 />
