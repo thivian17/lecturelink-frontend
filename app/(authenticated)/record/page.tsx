@@ -40,6 +40,7 @@ export default function RecordPage() {
   const audioInputRef = useRef<HTMLInputElement>(null)
   const slidesInputRef = useRef<HTMLInputElement>(null)
   const pollingRef = useRef<NodeJS.Timeout | null>(null)
+  const completionStartedRef = useRef<boolean>(false)
 
   // File size formatter
   const formatFileSize = (bytes: number): string => {
@@ -115,6 +116,12 @@ export default function RecordPage() {
       setStatusMessage(stageDisplay.label)
 
       if (status.status === 'completed') {
+        // Prevent multiple callbacks from running completion logic
+        if (completionStartedRef.current) {
+          return
+        }
+        completionStartedRef.current = true
+
         // Stop polling immediately
         if (pollingRef.current) {
           clearInterval(pollingRef.current)
@@ -229,6 +236,7 @@ export default function RecordPage() {
     setStage('uploading')
     setProgress(5)
     setStatusMessage('Uploading files...')
+    completionStartedRef.current = false
 
     try {
       // Get current user
