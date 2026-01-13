@@ -115,7 +115,7 @@ export default function RecordPage() {
       setStatusMessage(stageDisplay.label)
 
       if (status.status === 'completed') {
-        // Stop polling
+        // Stop polling immediately
         if (pollingRef.current) {
           clearInterval(pollingRef.current)
           pollingRef.current = null
@@ -128,10 +128,14 @@ export default function RecordPage() {
 
         try {
           const result = await api.getJobResult(jobId)
-          
-          if (result.markdown_content) {
-            const summary = await api.generateSummary(result.markdown_content, lectureName)
-            
+
+          // Store markdown content locally before any cleanup
+          const markdownContent = result.markdown_content
+
+          if (markdownContent) {
+            // Generate summary using locally stored content
+            const summary = await api.generateSummary(markdownContent, lectureName)
+
             // Save summary to database
             setStage('saving')
             setStatusMessage('Saving to database...')
@@ -149,20 +153,26 @@ export default function RecordPage() {
             // Update lecture status
             await supabase
               .from('lectures')
-              .update({ 
+              .update({
                 status: 'completed',
                 has_slides: !!slidesFile,
                 has_alignment: !!slidesFile,
               })
               .eq('id', lectureId)
+          } else {
+            // No markdown content, just mark as completed
+            await supabase
+              .from('lectures')
+              .update({ status: 'completed' })
+              .eq('id', lectureId)
           }
-
-          // Cleanup job on server
-          await api.deleteJob(jobId).catch(() => {})
 
           setStage('complete')
           setProgress(100)
           setStatusMessage('Processing complete!')
+
+          // Cleanup job on server AFTER everything is done
+          await api.deleteJob(jobId).catch(() => {})
 
           // Redirect after short delay
           setTimeout(() => {
@@ -176,7 +186,10 @@ export default function RecordPage() {
             .from('lectures')
             .update({ status: 'completed' })
             .eq('id', lectureId)
-          
+
+          // Cleanup job even on error
+          await api.deleteJob(jobId).catch(() => {})
+
           router.push(`/lecture/${lectureId}`)
         }
 
