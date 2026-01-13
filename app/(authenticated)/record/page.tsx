@@ -141,7 +141,9 @@ export default function RecordPage() {
 
           if (markdownContent) {
             // Generate summary using locally stored content
-            const summary = await api.generateSummary(markdownContent, lectureName)
+            const summaryResponse = await api.generateSummary(markdownContent, lectureName) as any
+            // API returns { summary: { title, key_concepts, ... } }
+            const summary = summaryResponse.summary || summaryResponse
 
             // Save summary to database
             setStage('saving')
@@ -150,10 +152,10 @@ export default function RecordPage() {
 
             await supabase.from('lecture_summaries').upsert({
               lecture_id: lectureId,
-              title: summary.title,
-              key_concepts: summary.key_concepts,
-              definitions: summary.definitions,
-              important_points: summary.main_takeaways,
+              title: summary.title || summaryResponse.lecture_title || lectureName,
+              key_concepts: summary.key_concepts || [],
+              definitions: summary.definitions || [],
+              important_points: summary.main_takeaways || [],
               action_items: [],
             })
 
