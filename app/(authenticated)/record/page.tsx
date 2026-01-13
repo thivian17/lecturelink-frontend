@@ -137,7 +137,7 @@ export default function RecordPage() {
           const result = await api.getJobResult(jobId)
 
           // Store markdown content locally before any cleanup
-          const markdownContent = result.markdown_content
+          const markdownContent = result.master_document?.markdown_content
 
           if (markdownContent) {
             // Generate summary using locally stored content

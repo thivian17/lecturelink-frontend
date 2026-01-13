@@ -35,10 +35,10 @@ export interface JobResult {
     coverage_rate: number
   }
   master_document?: {
+    markdown_content: string
     total_sections: number
     total_words: number
   }
-  markdown_content?: string
 }
 
 export interface SummaryResponse {
